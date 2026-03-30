@@ -134,8 +134,8 @@ update-desktop-database ~/.local/share/applications 2>/dev/null
 
 Your notes remain safe in:
 
-* `~/StickyNotes`
-* or `~/Dropbox/StickyNotes`
+* `~/navwrite`
+* or `~/Dropbox/navwrite`
 
 ---
 
