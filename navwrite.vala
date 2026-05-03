@@ -28,6 +28,9 @@ public class StickyApp : GLib.Object {
     private double pulse_scale = 1.0;
 
     private RGBA accent_green_rgba;
+    
+    private bool is_context_menu_open = false;
+    private int64 last_editor_close_time = 0;
 
     public StickyApp() {
         string dropbox_path = Path.build_filename(Environment.get_home_dir(), "Dropbox");
@@ -210,7 +213,12 @@ public class StickyApp : GLib.Object {
 
         hub_window.button_release_event.connect((event) => {
             if (!is_dragging) {
-                toggle_menu();
+                int64 now = GLib.get_monotonic_time();
+                if (editor_window != null) {
+                    force_close_editor();
+                } else if (now - last_editor_close_time > 200000) {
+                    toggle_menu();
+                }
             }
             return true;
         });
@@ -225,12 +233,20 @@ public class StickyApp : GLib.Object {
         if (menu_window != null) {
             menu_window.get_size(out mw, out mh);
             get_best_pos(mw, mh, out tx, out ty);
-            menu_window.move(tx, ty);
+            int cur_x, cur_y;
+            menu_window.get_position(out cur_x, out cur_y);
+            if (cur_x != tx || cur_y != ty) {
+                menu_window.move(tx, ty);
+            }
         }
         if (editor_window != null) {
             editor_window.get_size(out mw, out mh);
             get_best_pos(mw, mh, out tx, out ty);
-            editor_window.move(tx, ty);
+            int cur_x, cur_y;
+            editor_window.get_position(out cur_x, out cur_y);
+            if (cur_x != tx || cur_y != ty) {
+                editor_window.move(tx, ty);
+            }
         }
     }
 
@@ -373,9 +389,13 @@ public class StickyApp : GLib.Object {
         editor_window.set_skip_taskbar_hint(true);
         editor_window.set_skip_pager_hint(true);
         
-        editor_window.set_default_size(300, 420);
         editor_window.set_resizable(true);
+        editor_window.set_default_size(300, 420);
         editor_window.set_size_request(200, 200);
+
+        editor_window.size_allocate.connect((alloc) => {
+            refresh_child_positions();
+        });
 
         var outer = new Box(Orientation.VERTICAL, 0);
         var container = new Box(Orientation.VERTICAL, 0);
@@ -386,11 +406,15 @@ public class StickyApp : GLib.Object {
 
         title_entry = new Entry();
         title_entry.set_has_frame(false);
+        title_entry.set_width_chars(1);
+        title_entry.set_max_width_chars(1);
         title_entry.set_text(title != null ? title : "untitled");
         container.pack_start(title_entry, false, false, 0);
 
         var scroll = new ScrolledWindow(null, null);
         scroll.set_policy(PolicyType.NEVER, PolicyType.AUTOMATIC);
+        scroll.propagate_natural_width = false;
+        scroll.propagate_natural_height = false;
         text_view = new TextView();
         text_view.set_wrap_mode(WrapMode.WORD);
         scroll.add(text_view);
@@ -407,21 +431,61 @@ public class StickyApp : GLib.Object {
         text_view.get_buffer().changed.connect(() => { autosave(); });
         title_entry.changed.connect(() => { autosave(); });
 
+        title_entry.populate_popup.connect((popup) => {
+            var menu = popup as Gtk.Menu;
+            if (menu != null) {
+                is_context_menu_open = true;
+                menu.deactivate.connect(() => {
+                    is_context_menu_open = false;
+                    GLib.Idle.add(() => {
+                        if (editor_window != null && !editor_window.is_active) {
+                            force_close_editor();
+                        }
+                        return false;
+                    });
+                });
+            }
+        });
+
+        text_view.populate_popup.connect((popup) => {
+            var menu = popup as Gtk.Menu;
+            if (menu != null) {
+                is_context_menu_open = true;
+                menu.deactivate.connect(() => {
+                    is_context_menu_open = false;
+                    GLib.Idle.add(() => {
+                        if (editor_window != null && !editor_window.is_active) {
+                            force_close_editor();
+                        }
+                        return false;
+                    });
+                });
+            }
+        });
+
         editor_window.focus_out_event.connect((event) => {
-            force_close_editor();
+            if (!is_context_menu_open) {
+                force_close_editor();
+            }
             return false;
         });
 
         outer.pack_start(container, true, true, 0);
-        
+
         var resizer = new EventBox();
         resizer.set_size_request(10, 10);
         resizer.set_halign(Align.END);
         resizer.realize.connect (() => {
             resizer.get_window ().set_cursor (new Cursor.for_display(Gdk.Display.get_default(), CursorType.BOTTOM_RIGHT_CORNER));
         });
+        resizer.button_press_event.connect((event) => {
+            if (event.button == 1) {
+                editor_window.begin_resize_drag(WindowEdge.SOUTH_EAST, 1, (int)event.x_root, (int)event.y_root, event.time);
+            }
+            return true;
+        });
         outer.pack_end(resizer, false, false, 0);
-
+        
         editor_window.add(outer);
         
         int tx, ty, mw, mh;
@@ -471,6 +535,7 @@ public class StickyApp : GLib.Object {
             editor_window.destroy();
             editor_window = null;
             editing_note_title = null;
+            last_editor_close_time = GLib.get_monotonic_time();
         }
     }
 
