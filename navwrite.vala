@@ -1,6 +1,6 @@
 /*
  * Compilation:
- * valac --pkg gtk+-3.0 sticky_hub.vala -X -lm
+ * valac --pkg gtk+-3.0 navwrite.vala settings.vala -X -lm
  * * NOTE: The "-X -lm" part is CRITICAL because we use math functions (sin) 
  * for the diode pulse animation.
  */
@@ -28,11 +28,14 @@ public class StickyApp : GLib.Object {
     private double pulse_scale = 1.0;
 
     private RGBA accent_green_rgba;
+    private AppSettings settings;
     
     private bool is_context_menu_open = false;
     private int64 last_editor_close_time = 0;
 
     public StickyApp() {
+        settings = AppSettings.get_instance();
+        update_accent_rgba();
         string dropbox_path = Path.build_filename(Environment.get_home_dir(), "Dropbox");
         if (FileUtils.test(dropbox_path, FileTest.EXISTS | FileTest.IS_DIR)) {
             notes_dir = Path.build_filename(dropbox_path, "StickyNotes");
@@ -46,20 +49,25 @@ public class StickyApp : GLib.Object {
         app.activate.connect(on_activate);
     }
 
+    private void update_accent_rgba() {
+        accent_green_rgba.parse(settings.accent_color);
+    }
+
     private void init_styles() {
         var provider = new CssProvider();
         string css = """
             .sticky-card { 
-                background-color: #1e1e1e; 
+                background-color: %s; 
                 border-radius: 12px; 
                 border: 1px solid #333333;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.5);
             }
             .note-label { color: #eeeeee; font-weight: bold; font-size: 10pt; }
-            .add-label { color: #2ecc71; font-weight: bold; font-size: 10pt; }
+            .add-label { color: %s; font-weight: bold; font-size: 10pt; }
             .confirm-label { color: #ff453a; font-weight: bold; font-size: 9pt; }
             .dim-label { color: #555555; }
-            .editor-window { background-color: #1e1e1e; border-radius: 12px; border: 1px solid #333333; }
+            .editor-window { background-color: %s; border-radius: 12px; border: 1px solid #333333; }
+            .editor-header { background-color: rgba(0,0,0,0.2); border-top-left-radius: 12px; border-top-right-radius: 12px; padding: 4px 8px; }
             entry { 
                 background: none; 
                 border: none; 
@@ -69,12 +77,13 @@ public class StickyApp : GLib.Object {
                 box-shadow: none; 
             }
             textview text { 
-                background-color: #1e1e1e; 
+                background-color: transparent; 
                 color: #ffffff; 
-                font-size: 11pt; 
+                font-size: %dpt; 
             }
             entry:focus, textview:focus { border: none; box-shadow: none; outline: none; }
-        """;
+        """.printf(settings.bg_color, settings.accent_color, settings.bg_color, settings.font_size);
+        
         try {
             provider.load_from_data(css, -1);
             StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -135,10 +144,7 @@ public class StickyApp : GLib.Object {
 
             var settings_item = new Gtk.MenuItem.with_label("Settings...");
             settings_item.activate.connect(() => {
-                var dialog = new MessageDialog(null, DialogFlags.MODAL, MessageType.INFO, ButtonsType.OK, "Settings panel coming soon for the published version!");
-                dialog.title = "Navwrite Settings";
-                dialog.run();
-                dialog.destroy();
+                open_settings();
             });
             menu.append(settings_item);
 
@@ -154,6 +160,71 @@ public class StickyApp : GLib.Object {
             menu.show_all();
             menu.popup(null, null, tray_icon.position_menu, button, time);
         });
+    }
+
+    private void open_settings() {
+        var dialog = new Gtk.Window();
+        dialog.title = "Navwrite Settings";
+        dialog.set_default_size(300, 400);
+        dialog.set_type_hint(WindowTypeHint.DIALOG);
+        dialog.set_position(WindowPosition.CENTER);
+        dialog.get_style_context().add_class("sticky-card");
+
+        var box = new Box(Orientation.VERTICAL, 15);
+        box.set_margin_top(20);
+        box.set_margin_bottom(20);
+        box.set_margin_start(20);
+        box.set_margin_end(20);
+
+        // Accent Color
+        var accent_box = new Box(Orientation.HORIZONTAL, 10);
+        accent_box.pack_start(new Label("Accent Color:"), false, false, 0);
+        var accent_picker = new ColorButton.with_rgba(accent_green_rgba);
+        accent_box.pack_end(accent_picker, false, false, 0);
+        box.add(accent_box);
+
+        // Background Color
+        var bg_box = new Box(Orientation.HORIZONTAL, 10);
+        bg_box.pack_start(new Label("Background Color:"), false, false, 0);
+        var bg_rgba = RGBA();
+        bg_rgba.parse(settings.bg_color);
+        var bg_picker = new ColorButton.with_rgba(bg_rgba);
+        bg_box.pack_end(bg_picker, false, false, 0);
+        box.add(bg_box);
+
+        // Font Size
+        var font_box = new Box(Orientation.HORIZONTAL, 10);
+        font_box.pack_start(new Label("Font Size:"), false, false, 0);
+        var font_spin = new SpinButton.with_range(8, 24, 1);
+        font_spin.set_value(settings.font_size);
+        font_box.pack_end(font_spin, false, false, 0);
+        box.add(font_box);
+
+        // Opacity
+        var opacity_box = new Box(Orientation.VERTICAL, 5);
+        opacity_box.pack_start(new Label("Window Opacity:"), false, false, 0);
+        var opacity_scale = new Scale.with_range(Orientation.HORIZONTAL, 0.5, 1.0, 0.05);
+        opacity_scale.set_value(settings.opacity);
+        opacity_box.pack_start(opacity_scale, true, true, 0);
+        box.add(opacity_box);
+
+        var save_btn = new Button.with_label("Save & Apply");
+        save_btn.clicked.connect(() => {
+            settings.accent_color = accent_picker.get_rgba().to_string();
+            settings.bg_color = bg_picker.get_rgba().to_string();
+            settings.font_size = (int)font_spin.get_value();
+            settings.opacity = opacity_scale.get_value();
+            settings.save();
+            
+            update_accent_rgba();
+            init_styles();
+            if (editor_window != null) editor_window.set_opacity(settings.opacity);
+            dialog.destroy();
+        });
+        box.pack_end(save_btn, false, false, 0);
+
+        dialog.add(box);
+        dialog.show_all();
     }
 
     private void create_hub() {
@@ -392,12 +463,36 @@ public class StickyApp : GLib.Object {
         editor_window.set_resizable(true);
         editor_window.set_default_size(300, 420);
         editor_window.set_size_request(200, 200);
+        editor_window.set_opacity(settings.opacity);
 
         editor_window.size_allocate.connect((alloc) => {
             refresh_child_positions();
         });
 
         var outer = new Box(Orientation.VERTICAL, 0);
+        
+        // Header Bar with Logo
+        var header = new EventBox();
+        header.get_style_context().add_class("editor-header");
+        var header_content = new Box(Orientation.HORIZONTAL, 6);
+        
+        try {
+            var logo_pixbuf = new Gdk.Pixbuf.from_file_at_scale("navwriter.png", 20, 20, true);
+            var logo_img = new Gtk.Image.from_pixbuf(logo_pixbuf);
+            header_content.pack_start(logo_img, false, false, 0);
+        } catch (Error e) {
+            stderr.printf("Logo Error: %s\n", e.message);
+        }
+
+        header.add(header_content);
+        header.button_press_event.connect((event) => {
+            if (event.button == 1) {
+                editor_window.begin_move_drag((int)event.button, (int)event.x_root, (int)event.y_root, event.time);
+            }
+            return true;
+        });
+        outer.pack_start(header, false, false, 0);
+
         var container = new Box(Orientation.VERTICAL, 0);
         container.set_margin_top(10);
         container.set_margin_bottom(10);
