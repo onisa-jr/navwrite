@@ -111,37 +111,119 @@ public class StickyApp : GLib.Object {
         var provider = new CssProvider();
         string css = """
             .sticky-card { 
-                background-color: #1e1e1e; 
-                border-radius: 12px; 
-                border: 1px solid #333333;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+                background-color: #1a1a1a; 
+                border-radius: 14px; 
+                border: 1px solid rgba(255, 255, 255, 0.09); 
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65); 
             }
-            .note-label { color: #eeeeee; font-weight: bold; font-size: 10pt; }
-            .add-label { color: #2ecc71; font-weight: bold; font-size: 10pt; }
-            .confirm-label { color: #ff453a; font-weight: bold; font-size: 9pt; }
-            .dim-label { color: #555555; }
+            .note-row { 
+                border-radius: 8px; 
+                transition: background-color 150ms ease;
+            }
+            .note-row:hover { 
+                background-color: rgba(255, 255, 255, 0.07); 
+            }
+            .note-label { 
+                color: #e0e0e0; 
+                font-weight: 600; 
+                font-size: 10pt; 
+            }
+            .note-row:hover .note-label {
+                color: #ffffff;
+            }
+            .add-row {
+                border-radius: 8px;
+                background-color: rgba(46, 204, 113, 0.08);
+                transition: background-color 150ms ease;
+                margin-top: 4px;
+            }
+            .add-row:hover {
+                background-color: rgba(46, 204, 113, 0.20);
+            }
+            .add-label { 
+                color: #2ecc71; 
+                font-weight: bold; 
+                font-size: 10pt; 
+            }
+            .confirm-label { 
+                color: #ff5252; 
+                font-weight: bold; 
+                font-size: 9pt; 
+            }
+            .dim-label { 
+                color: #666666; 
+                font-size: 10pt;
+                transition: color 150ms ease;
+            }
+            .note-row:hover .dim-label {
+                color: #999999;
+            }
+            .dim-label:hover { 
+                color: #ff5252; 
+            }
+            .confirm-btn-yes {
+                background: #e74c3c;
+                color: #ffffff;
+                border-radius: 6px;
+                font-size: 8pt;
+                font-weight: bold;
+                border: none;
+            }
+            .confirm-btn-no {
+                background: #333333;
+                color: #cccccc;
+                border-radius: 6px;
+                font-size: 8pt;
+                font-weight: bold;
+                border: none;
+            }
             .editor-window { 
-                background-color: #1e1e1e; 
-                border-radius: 12px; 
-                border: 1px solid #333333; 
+                background-color: #1a1a1a; 
+                border-radius: 14px; 
+                border: 1px solid rgba(255, 255, 255, 0.09); 
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65); 
+            }
+            .editor-header {
+                border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+                padding-bottom: 6px;
+                margin-bottom: 8px;
             }
             entry { 
                 background: none; 
                 border: none; 
-                color: #aaaaaa; 
-                font-weight: bold; 
-                font-size: 11pt; 
-                box-shadow: none; 
-            }
-            textview text { 
-                background-color: #1e1e1e; 
                 color: #ffffff; 
+                font-weight: bold; 
+                font-size: 12pt; 
+                box-shadow: none; 
+                padding: 2px 0;
+            }
+            textview, textview text { 
+                background-color: transparent; 
+                color: #e6e6e6; 
                 font-size: 11pt; 
+                line-height: 1.5;
             }
             entry:focus, textview:focus { 
                 border: none; 
                 box-shadow: none; 
                 outline: none; 
+            }
+            /* Eliminate all visible scrollbars */
+            scrollbar,
+            scrollbar *,
+            scrollbar slider,
+            scrollbar trough { 
+                min-width: 0px; 
+                min-height: 0px; 
+                width: 0px; 
+                height: 0px; 
+                opacity: 0; 
+                margin: 0px; 
+                padding: 0px; 
+                border: none; 
+                background: transparent; 
+                -GtkScrollbar-has-backward-stepper: false;
+                -GtkScrollbar-has-forward-stepper: false;
             }
         """;
         try {
@@ -219,7 +301,7 @@ public class StickyApp : GLib.Object {
 
         hub_window.button_release_event.connect((event) => {
             if (!is_dragging) {
-                toggle_menu();
+                on_hub_clicked();
             }
             return true;
         });
@@ -271,12 +353,34 @@ public class StickyApp : GLib.Object {
     // Notes Menu (List & Selection)
     // ------------------------------------------------------------------------
 
-    private void toggle_menu() {
+    private void on_hub_clicked() {
+        // If the note pad is open, dismiss and save it, then reverse back to the titles list
+        if (editor_window != null) {
+            force_close_editor();
+            show_menu();
+            return;
+        }
+
+        // If the titles list is already open, close it
+        if (menu_window != null) {
+            close_menu();
+            return;
+        }
+
+        // Neither is open: reveal the titles list
+        show_menu();
+    }
+
+    private void close_menu() {
         if (menu_window != null) {
             menu_window.destroy();
             menu_window = null;
-            return;
         }
+    }
+
+    private void show_menu() {
+        force_close_editor();
+        close_menu();
 
         menu_window = new Gtk.Window();
         menu_window.get_style_context().add_class("sticky-card");
@@ -289,13 +393,13 @@ public class StickyApp : GLib.Object {
         outer_box.set_border_width(8);
 
         var scroll = new ScrolledWindow(null, null);
-        scroll.set_policy(PolicyType.NEVER, PolicyType.AUTOMATIC);
+        scroll.set_policy(PolicyType.NEVER, PolicyType.EXTERNAL);
         scroll.set_shadow_type(ShadowType.NONE);
         scroll.set_propagate_natural_height(true);
         scroll.set_propagate_natural_width(true);
         scroll.set_max_content_height(420);
 
-        var notes_box = new Box(Orientation.VERTICAL, 4);
+        var notes_box = new Box(Orientation.VERTICAL, 3);
         var notes_list = new GLib.List<NoteItem>();
 
         try {
@@ -328,6 +432,47 @@ public class StickyApp : GLib.Object {
         outer_box.pack_end(create_branch_item("+ New Note", true), false, false, 0);
 
         menu_window.add(outer_box);
+
+        // Automatic cursor scrolling: smooth auto-scroll when hovering near top/bottom edges
+        var vadj = scroll.get_vadjustment();
+        menu_window.add_tick_callback((w, clock) => {
+            if (menu_window == null) return false;
+
+            var pointer = Gdk.Display.get_default().get_default_seat().get_pointer();
+            int rx, ry;
+            pointer.get_position(null, out rx, out ry);
+
+            int wx, wy, ww, wh;
+            menu_window.get_position(out wx, out wy);
+            menu_window.get_size(out ww, out wh);
+
+            if (rx >= wx && rx <= wx + ww && ry >= wy && ry <= wy + wh) {
+                double win_y = ry - wy;
+                double zone = 75.0;
+                double velocity = 0.0;
+
+                if (win_y < zone) {
+                    double factor = (zone - win_y) / zone;
+                    velocity = -2.0 - factor * 8.0;
+                } else if (win_y > wh - zone) {
+                    double factor = (win_y - (wh - zone)) / zone;
+                    velocity = 2.0 + factor * 8.0;
+                }
+
+                if (velocity != 0.0) {
+                    double cur = vadj.get_value();
+                    double max_v = vadj.get_upper() - vadj.get_page_size();
+                    if (max_v > 0) {
+                        double next_v = (cur + velocity).clamp(vadj.get_lower(), max_v);
+                        if (next_v != cur) {
+                            vadj.set_value(next_v);
+                        }
+                    }
+                }
+            }
+            return true;
+        });
+
         menu_window.show_all();
 
         int tx, ty, mw, mh;
@@ -338,11 +483,16 @@ public class StickyApp : GLib.Object {
 
     private Widget create_branch_item(string title, bool is_add) {
         var event_box = new EventBox();
+        event_box.get_style_context().add_class(is_add ? "add-row" : "note-row");
+        event_box.realize.connect(() => {
+            event_box.get_window().set_cursor(new Cursor.for_display(Gdk.Display.get_default(), CursorType.HAND2));
+        });
+
         var main_stack = new Stack();
         main_stack.set_transition_type(StackTransitionType.CROSSFADE);
 
         var normal_box = new Box(Orientation.HORIZONTAL, 10);
-        normal_box.set_size_request(220, 42);
+        normal_box.set_size_request(220, 38);
         normal_box.set_margin_start(10);
         normal_box.set_margin_end(10);
 
@@ -357,12 +507,14 @@ public class StickyApp : GLib.Object {
             normal_box.pack_end(del_trigger, false, false, 0);
 
             var confirm_box = new Box(Orientation.HORIZONTAL, 8);
-            confirm_box.set_size_request(220, 42);
+            confirm_box.set_size_request(220, 38);
             var sure_lbl = new Label("Sure?");
             sure_lbl.get_style_context().add_class("confirm-label");
 
             var yes_btn = new Button.with_label("Yes");
+            yes_btn.get_style_context().add_class("confirm-btn-yes");
             var no_btn = new Button.with_label("No");
+            no_btn.get_style_context().add_class("confirm-btn-no");
 
             confirm_box.pack_start(sure_lbl, true, true, 0);
             confirm_box.pack_end(no_btn, false, false, 0);
@@ -397,8 +549,7 @@ public class StickyApp : GLib.Object {
         string safe_name = title.replace("/", "_");
         var file = File.new_for_path(Path.build_filename(notes_dir, safe_name + ".txt"));
         try { file.delete(); } catch (Error e) {}
-        toggle_menu();
-        toggle_menu();
+        show_menu();
     }
 
     // ------------------------------------------------------------------------
@@ -406,8 +557,8 @@ public class StickyApp : GLib.Object {
     // ------------------------------------------------------------------------
 
     private void open_editor(string? title) {
-        if (menu_window != null) menu_window.destroy();
-        menu_window = null;
+        close_menu();
+        force_close_editor();
 
         editing_note_title = title;
         editor_window = new Gtk.Window();
@@ -423,18 +574,36 @@ public class StickyApp : GLib.Object {
 
         var outer = new Box(Orientation.VERTICAL, 0);
         var container = new Box(Orientation.VERTICAL, 0);
-        container.set_margin_top(10);
-        container.set_margin_bottom(10);
-        container.set_margin_start(10);
-        container.set_margin_end(10);
+        container.set_margin_top(12);
+        container.set_margin_bottom(12);
+        container.set_margin_start(14);
+        container.set_margin_end(14);
 
         title_entry = new Entry();
         title_entry.set_has_frame(false);
         title_entry.set_text(title != null ? title : "untitled");
-        container.pack_start(title_entry, false, false, 0);
+
+        // Prevent title from automatically selecting text when focused
+        title_entry.focus_in_event.connect((event) => {
+            Idle.add(() => {
+                if (title_entry != null) {
+                    title_entry.select_region(0, 0);
+                    title_entry.set_position(-1);
+                }
+                return false;
+            });
+            return false;
+        });
+
+        var header_box = new Box(Orientation.VERTICAL, 0);
+        header_box.get_style_context().add_class("editor-header");
+        header_box.pack_start(title_entry, false, false, 0);
+        container.pack_start(header_box, false, false, 0);
 
         var scroll = new ScrolledWindow(null, null);
-        scroll.set_policy(PolicyType.NEVER, PolicyType.AUTOMATIC);
+        scroll.set_policy(PolicyType.NEVER, PolicyType.EXTERNAL);
+        scroll.set_shadow_type(ShadowType.NONE);
+
         text_view = new TextView();
         text_view.set_wrap_mode(WrapMode.WORD);
         scroll.add(text_view);
@@ -461,12 +630,53 @@ public class StickyApp : GLib.Object {
         outer.pack_start(container, true, true, 0);
 
         var resizer = new EventBox();
-        resizer.set_size_request(10, 10);
+        resizer.set_size_request(12, 12);
         resizer.set_halign(Align.END);
         resizer.realize.connect(() => {
             resizer.get_window().set_cursor(new Cursor.for_display(Gdk.Display.get_default(), CursorType.BOTTOM_RIGHT_CORNER));
         });
         outer.pack_end(resizer, false, false, 0);
+
+        // Automatic cursor scrolling for editor window
+        var editor_vadj = scroll.get_vadjustment();
+        editor_window.add_tick_callback((w, clock) => {
+            if (editor_window == null) return false;
+
+            var pointer = Gdk.Display.get_default().get_default_seat().get_pointer();
+            int rx, ry;
+            pointer.get_position(null, out rx, out ry);
+
+            int wx, wy, ww, wh;
+            editor_window.get_position(out wx, out wy);
+            editor_window.get_size(out ww, out wh);
+
+            if (rx >= wx && rx <= wx + ww && ry >= wy && ry <= wy + wh) {
+                double win_y = ry - wy;
+                double zone = 60.0;
+                double velocity = 0.0;
+
+                // Auto-scroll when near top (below title header) or bottom edge
+                if (win_y > 45 && win_y < 45 + zone) {
+                    double factor = (zone - (win_y - 45)) / zone;
+                    velocity = -2.0 - factor * 8.0;
+                } else if (win_y > wh - zone) {
+                    double factor = (win_y - (wh - zone)) / zone;
+                    velocity = 2.0 + factor * 8.0;
+                }
+
+                if (velocity != 0.0) {
+                    double cur = editor_vadj.get_value();
+                    double max_v = editor_vadj.get_upper() - editor_vadj.get_page_size();
+                    if (max_v > 0) {
+                        double next_v = (cur + velocity).clamp(editor_vadj.get_lower(), max_v);
+                        if (next_v != cur) {
+                            editor_vadj.set_value(next_v);
+                        }
+                    }
+                }
+            }
+            return true;
+        });
 
         editor_window.add(outer);
 
@@ -474,18 +684,29 @@ public class StickyApp : GLib.Object {
         editor_window.get_size(out mw, out mh);
         get_best_pos(mw, mh, out tx, out ty);
         editor_window.move(tx, ty);
+        editor_window.set_focus(text_view);
         editor_window.show_all();
+
+        // Clear any text selection in the title
+        title_entry.select_region(0, 0);
+        title_entry.set_position(-1);
 
         Idle.add(() => {
             if (editor_window == null) return false;
-            if (editing_note_title == null) title_entry.grab_focus();
-            else text_view.grab_focus();
+            text_view.grab_focus();
+            if (title_entry != null) {
+                title_entry.select_region(0, 0);
+                title_entry.set_position(-1);
+            }
             return false;
         });
 
         container.bind_property("visible", text_view, "visible", BindingFlags.DEFAULT);
         text_view.button_press_event.connect((e) => { text_view.grab_focus(); return false; });
-        title_entry.button_press_event.connect((e) => { title_entry.grab_focus(); return false; });
+        title_entry.button_press_event.connect((e) => { 
+            title_entry.grab_focus_without_selecting();
+            return false; 
+        });
     }
 
     private void autosave() {
@@ -559,10 +780,7 @@ public class StickyApp : GLib.Object {
             toggle_item.activate.connect(() => {
                 if (hub_window.get_visible()) {
                     force_close_editor();
-                    if (menu_window != null) {
-                        menu_window.destroy();
-                        menu_window = null;
-                    }
+                    close_menu();
                     hub_window.hide();
                 } else {
                     hub_window.show_all();

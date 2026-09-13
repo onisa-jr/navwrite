@@ -43,7 +43,7 @@ Traditional note applications require opening heavy windows, managing documents,
 - **Single-Click Capture**: Open any note or start a blank scratchpad in under a second.
 - **Zero-Friction Auto-Save**: Saves every single keystroke in real-time; closes automatically the moment you click away to return to your work.
 - **Smart Chronological Organization**: Notes are automatically ordered by your most recently modified pads first, ensuring active thoughts remain at your fingertips without manual reordering.
-- **Dynamic Scrollable Shelf**: Cleanly accommodates large collections of notes without overflowing the screen.
+- **Scrollbar-Free UI with Automatic Cursor Scrolling**: Eliminates visual scrollbars for a minimalist aesthetic; moving the mouse cursor near the top or bottom of the shelf or editor smoothly auto-scrolls the content.
 - **Automatic Cloud Sync**: Automatically detects and synchronizes with your Dropbox folder (`~/Dropbox/StickyNotes`) with zero configuration required. Falls back gracefully to local storage (`~/StickyNotes`).
 - **System Tray Integration**: Easily hide the hub for deep-focus sessions, access settings, or quit cleanly from your desktop panel.
 - **Strict Single-Instance**: Launching NavWrite while it is already active simply brings your existing hub and notes to the front.
