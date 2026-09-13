@@ -1,35 +1,65 @@
 /*
+ * NavWrite - Fast, floating, distraction-free scratchpad for Linux.
+ *
  * Compilation:
- * valac --pkg gtk+-3.0 sticky_hub.vala -X -lm
- * * NOTE: The "-X -lm" part is CRITICAL because we use math functions (sin) 
- * for the diode pulse animation.
+ *   valac --pkg gtk+-3.0 sticky_hub.vala -X -lm -o navwrite
  */
 
 using Gtk;
 using Gdk;
 
+// ============================================================================
+// Model: Note Item
+// ============================================================================
+
+public class NoteItem : GLib.Object {
+    public string name { get; set; }
+    public int64 mtime { get; set; }
+
+    public NoteItem(string name, int64 mtime) {
+        this.name = name;
+        this.mtime = mtime;
+    }
+}
+
+// ============================================================================
+// Main Application Class: StickyApp
+// ============================================================================
+
 public class StickyApp : GLib.Object {
+    // GTK Application & Top-Level Windows
     private Gtk.Application app;
     private Gtk.Window hub_window;
-    private Gtk.Window menu_window;
-    private Gtk.Window editor_window;
-    
+    private Gtk.Window? menu_window = null;
+    private Gtk.Window? editor_window = null;
     private StatusIcon tray_icon;
-    
+
+    // Storage & State
     private string notes_dir;
     private string? editing_note_title = null;
-    
+    private Entry title_entry;
+    private TextView text_view;
+
+    // Layout & Geometry
     private int hub_x = 100;
     private int hub_y = 100;
     private int circle_size = 56;
-    private int gap = 15; 
+    private int gap = 15;
 
+    // Visual Animation
     private double pulse_alpha = 1.0;
     private double pulse_scale = 1.0;
-
     private RGBA accent_green_rgba;
 
+    // ------------------------------------------------------------------------
+    // Initialization & Lifecycle
+    // ------------------------------------------------------------------------
+
     public StickyApp() {
+        accent_green_rgba = RGBA();
+        accent_green_rgba.parse("#2ecc71");
+
+        // Prefer Dropbox directory for cloud sync if available
         string dropbox_path = Path.build_filename(Environment.get_home_dir(), "Dropbox");
         if (FileUtils.test(dropbox_path, FileTest.EXISTS | FileTest.IS_DIR)) {
             notes_dir = Path.build_filename(dropbox_path, "StickyNotes");
@@ -38,10 +68,44 @@ public class StickyApp : GLib.Object {
         }
         DirUtils.create_with_parents(notes_dir, 0755);
 
-        
+        // Strict single-instance configuration
         app = new Gtk.Application("com.navwrite.stickybubble", ApplicationFlags.DEFAULT_FLAGS);
+        app.startup.connect(on_startup);
         app.activate.connect(on_activate);
     }
+
+    private void on_startup() {
+        app.hold();
+        init_styles();
+        create_hub();
+        setup_tray_icon();
+    }
+
+    private void on_activate() {
+        // When launched again while already running, raise the existing hub
+        if (hub_window != null) {
+            if (!hub_window.get_visible()) {
+                hub_window.show_all();
+            }
+            hub_window.present();
+            if (menu_window != null) {
+                menu_window.show_all();
+                menu_window.present();
+            }
+            if (editor_window != null) {
+                editor_window.show_all();
+                editor_window.present();
+            }
+        }
+    }
+
+    public int run(string[] args) {
+        return app.run(args);
+    }
+
+    // ------------------------------------------------------------------------
+    // UI Theming
+    // ------------------------------------------------------------------------
 
     private void init_styles() {
         var provider = new CssProvider();
@@ -50,13 +114,17 @@ public class StickyApp : GLib.Object {
                 background-color: #1e1e1e; 
                 border-radius: 12px; 
                 border: 1px solid #333333;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
             }
             .note-label { color: #eeeeee; font-weight: bold; font-size: 10pt; }
             .add-label { color: #2ecc71; font-weight: bold; font-size: 10pt; }
             .confirm-label { color: #ff453a; font-weight: bold; font-size: 9pt; }
             .dim-label { color: #555555; }
-            .editor-window { background-color: #1e1e1e; border-radius: 12px; border: 1px solid #333333; }
+            .editor-window { 
+                background-color: #1e1e1e; 
+                border-radius: 12px; 
+                border: 1px solid #333333; 
+            }
             entry { 
                 background: none; 
                 border: none; 
@@ -70,88 +138,27 @@ public class StickyApp : GLib.Object {
                 color: #ffffff; 
                 font-size: 11pt; 
             }
-            entry:focus, textview:focus { border: none; box-shadow: none; outline: none; }
+            entry:focus, textview:focus { 
+                border: none; 
+                box-shadow: none; 
+                outline: none; 
+            }
         """;
         try {
             provider.load_from_data(css, -1);
-            StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+            StyleContext.add_provider_for_screen(
+                Gdk.Screen.get_default(), 
+                provider, 
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            );
         } catch (Error e) {
             stderr.printf("CSS Error: %s\n", e.message);
         }
     }
 
-    private void on_activate() {
-        app.hold();
-        
-        init_styles();
-        create_hub();
-        setup_tray_icon();
-    }
-
-    private void setup_tray_icon() {
-        string home = Environment.get_home_dir();
-        string[] icon_paths = {
-        };
-
-        bool icon_loaded = false;
-        foreach (string path in icon_paths) {
-            if (FileUtils.test(path, FileTest.EXISTS)) {
-                try {
-                    var pixbuf = new Gdk.Pixbuf.from_file_at_scale(path, 24, 24, true);
-                    tray_icon = new StatusIcon.from_pixbuf(pixbuf);
-                    icon_loaded = true;
-                    break;
-                } catch (Error e) {
-                }
-            }
-        }
-
-        if (!icon_loaded) {
-            tray_icon = new StatusIcon.from_icon_name("accessories-text-editor");
-        }
-        
-        tray_icon.set_tooltip_text("Navwrite");
-
-        tray_icon.popup_menu.connect((button, time) => {
-            var menu = new Gtk.Menu();
-
-            var toggle_item = new Gtk.MenuItem.with_label(hub_window.get_visible() ? "Hide Hub" : "Show Hub");
-            toggle_item.activate.connect(() => {
-                if (hub_window.get_visible()) {
-                    force_close_editor();
-                    if (menu_window != null) {
-                        menu_window.destroy();
-                        menu_window = null;
-                    }
-                    hub_window.hide();
-                } else {
-                    hub_window.show_all();
-                }
-            });
-            menu.append(toggle_item);
-
-            var settings_item = new Gtk.MenuItem.with_label("Settings...");
-            settings_item.activate.connect(() => {
-                var dialog = new MessageDialog(null, DialogFlags.MODAL, MessageType.INFO, ButtonsType.OK, "Settings panel coming soon for the published version!");
-                dialog.title = "Navwrite Settings";
-                dialog.run();
-                dialog.destroy();
-            });
-            menu.append(settings_item);
-
-            menu.append(new Gtk.SeparatorMenuItem());
-
-            var quit_item = new Gtk.MenuItem.with_label("Quit Navwrite");
-            quit_item.activate.connect(() => {
-                force_close_editor();
-                app.quit();
-            });
-            menu.append(quit_item);
-
-            menu.show_all();
-            menu.popup(null, null, tray_icon.position_menu, button, time);
-        });
-    }
+    // ------------------------------------------------------------------------
+    // Floating Hub Widget
+    // ------------------------------------------------------------------------
 
     private void create_hub() {
         hub_window = new Gtk.Window();
@@ -164,28 +171,30 @@ public class StickyApp : GLib.Object {
 
         var drawing_area = new DrawingArea();
         drawing_area.draw.connect((ctx) => {
+            // Pulsing outer diode circle
             ctx.set_source_rgba(accent_green_rgba.red, accent_green_rgba.green, accent_green_rgba.blue, pulse_alpha);
-            double r = (circle_size / 2 - 6) * pulse_scale;
-            ctx.arc(circle_size / 2, circle_size / 2, r, 0, 2 * Math.PI);
+            double r = (circle_size / 2.0 - 6.0) * pulse_scale;
+            ctx.arc(circle_size / 2.0, circle_size / 2.0, r, 0, 2 * Math.PI);
             ctx.fill();
-            
+
+            // Inner core dot
             ctx.set_source_rgba(accent_green_rgba.red * 0.5, accent_green_rgba.green * 0.5, accent_green_rgba.blue * 0.5, 0.8);
-            ctx.arc(circle_size / 2, circle_size / 2, 8, 0, 2 * Math.PI);
+            ctx.arc(circle_size / 2.0, circle_size / 2.0, 8.0, 0, 2 * Math.PI);
             ctx.fill();
             return true;
         });
 
-        hub_window.add_tick_callback ((w, clock) => {
-            double time = clock.get_frame_time () / 1000000.0;
-            pulse_alpha = 0.7 + 0.3 * Math.sin (time * 0.5);
-            pulse_scale = 1.0 + 0.05 * Math.sin (time * 0.5);
-            drawing_area.queue_draw ();
+        hub_window.add_tick_callback((w, clock) => {
+            double time = clock.get_frame_time() / 1000000.0;
+            pulse_alpha = 0.7 + 0.3 * Math.sin(time * 0.5);
+            pulse_scale = 1.0 + 0.05 * Math.sin(time * 0.5);
+            drawing_area.queue_draw();
             return true;
         });
 
         hub_window.add(drawing_area);
         hub_window.add_events(EventMask.BUTTON_PRESS_MASK | EventMask.BUTTON_RELEASE_MASK | EventMask.BUTTON1_MOTION_MASK);
-        
+
         int start_x = 0;
         int start_y = 0;
         bool is_dragging = false;
@@ -220,6 +229,10 @@ public class StickyApp : GLib.Object {
         app.add_window(hub_window);
     }
 
+    // ------------------------------------------------------------------------
+    // Geometry & Dynamic Placement Engine
+    // ------------------------------------------------------------------------
+
     private void refresh_child_positions() {
         int tx, ty, mw, mh;
         if (menu_window != null) {
@@ -242,7 +255,7 @@ public class StickyApp : GLib.Object {
         Gdk.Rectangle geo = monitor.get_geometry();
 
         target_y = hy - 15;
-        
+
         if (hx + (circle_size / 2) > geo.x + (geo.width / 2)) {
             target_x = hx - win_w - gap;
         } else {
@@ -253,6 +266,10 @@ public class StickyApp : GLib.Object {
         if (target_x < geo.x + 10) target_x = geo.x + 10;
         if (target_x + win_w > geo.x + geo.width - 10) target_x = geo.x + geo.width - win_w - 10;
     }
+
+    // ------------------------------------------------------------------------
+    // Notes Menu (List & Selection)
+    // ------------------------------------------------------------------------
 
     private void toggle_menu() {
         if (menu_window != null) {
@@ -268,26 +285,51 @@ public class StickyApp : GLib.Object {
         menu_window.set_keep_above(true);
         menu_window.set_skip_taskbar_hint(true);
 
-        var box = new Box(Orientation.VERTICAL, 4);
-        box.set_border_width(8);
+        var outer_box = new Box(Orientation.VERTICAL, 4);
+        outer_box.set_border_width(8);
 
-        int count = 0;
+        var scroll = new ScrolledWindow(null, null);
+        scroll.set_policy(PolicyType.NEVER, PolicyType.AUTOMATIC);
+        scroll.set_shadow_type(ShadowType.NONE);
+        scroll.set_propagate_natural_height(true);
+        scroll.set_propagate_natural_width(true);
+        scroll.set_max_content_height(420);
+
+        var notes_box = new Box(Orientation.VERTICAL, 4);
+        var notes_list = new GLib.List<NoteItem>();
+
         try {
             var directory = File.new_for_path(notes_dir);
-            var enumerator = directory.enumerate_children("standard::name", FileQueryInfoFlags.NONE);
+            var enumerator = directory.enumerate_children("standard::name,time::modified", FileQueryInfoFlags.NONE);
             FileInfo info;
-            while ((info = enumerator.next_file()) != null && count < 10) {
-                if (info.get_name().has_suffix(".txt")) {
-                    box.add(create_branch_item(info.get_name().replace(".txt", ""), false));
-                    count++;
+            while ((info = enumerator.next_file()) != null) {
+                string name = info.get_name();
+                if (name.has_suffix(".txt")) {
+                    var dt = info.get_modification_date_time();
+                    int64 mtime = (dt != null) ? dt.to_unix() : 0;
+                    notes_list.append(new NoteItem(name.replace(".txt", ""), mtime));
                 }
             }
         } catch (Error e) {}
 
-        box.add(create_branch_item("+ New Note", true));
-        menu_window.add(box);
+        // Sort: Most recently modified first, with alphabetical tie-breaking
+        notes_list.sort((a, b) => {
+            if (b.mtime > a.mtime) return 1;
+            if (b.mtime < a.mtime) return -1;
+            return a.name.collate(b.name);
+        });
+
+        foreach (var note in notes_list) {
+            notes_box.add(create_branch_item(note.name, false));
+        }
+
+        scroll.add(notes_box);
+        outer_box.pack_start(scroll, true, true, 0);
+        outer_box.pack_end(create_branch_item("+ New Note", true), false, false, 0);
+
+        menu_window.add(outer_box);
         menu_window.show_all();
-        
+
         int tx, ty, mw, mh;
         menu_window.get_size(out mw, out mh);
         get_best_pos(mw, mh, out tx, out ty);
@@ -298,7 +340,7 @@ public class StickyApp : GLib.Object {
         var event_box = new EventBox();
         var main_stack = new Stack();
         main_stack.set_transition_type(StackTransitionType.CROSSFADE);
-        
+
         var normal_box = new Box(Orientation.HORIZONTAL, 10);
         normal_box.set_size_request(220, 42);
         normal_box.set_margin_start(10);
@@ -318,10 +360,10 @@ public class StickyApp : GLib.Object {
             confirm_box.set_size_request(220, 42);
             var sure_lbl = new Label("Sure?");
             sure_lbl.get_style_context().add_class("confirm-label");
-            
+
             var yes_btn = new Button.with_label("Yes");
             var no_btn = new Button.with_label("No");
-            
+
             confirm_box.pack_start(sure_lbl, true, true, 0);
             confirm_box.pack_end(no_btn, false, false, 0);
             confirm_box.pack_end(yes_btn, false, false, 0);
@@ -352,14 +394,16 @@ public class StickyApp : GLib.Object {
     }
 
     private void delete_note(string title) {
-        var file = File.new_for_path(Path.build_filename(notes_dir, title + ".txt"));
+        string safe_name = title.replace("/", "_");
+        var file = File.new_for_path(Path.build_filename(notes_dir, safe_name + ".txt"));
         try { file.delete(); } catch (Error e) {}
         toggle_menu();
         toggle_menu();
     }
 
-    private Entry title_entry;
-    private TextView text_view;
+    // ------------------------------------------------------------------------
+    // Note Editor Window
+    // ------------------------------------------------------------------------
 
     private void open_editor(string? title) {
         if (menu_window != null) menu_window.destroy();
@@ -372,7 +416,7 @@ public class StickyApp : GLib.Object {
         editor_window.set_keep_above(true);
         editor_window.set_skip_taskbar_hint(true);
         editor_window.set_skip_pager_hint(true);
-        
+
         editor_window.set_default_size(300, 420);
         editor_window.set_resizable(true);
         editor_window.set_size_request(200, 200);
@@ -399,7 +443,8 @@ public class StickyApp : GLib.Object {
         if (title != null) {
             try {
                 string content;
-                FileUtils.get_contents(Path.build_filename(notes_dir, title + ".txt"), out content);
+                string safe_name = title.replace("/", "_");
+                FileUtils.get_contents(Path.build_filename(notes_dir, safe_name + ".txt"), out content);
                 text_view.get_buffer().set_text(content);
             } catch (Error e) {}
         }
@@ -407,29 +452,30 @@ public class StickyApp : GLib.Object {
         text_view.get_buffer().changed.connect(() => { autosave(); });
         title_entry.changed.connect(() => { autosave(); });
 
+        // Auto-save and close when user clicks away
         editor_window.focus_out_event.connect((event) => {
             force_close_editor();
             return false;
         });
 
         outer.pack_start(container, true, true, 0);
-        
+
         var resizer = new EventBox();
         resizer.set_size_request(10, 10);
         resizer.set_halign(Align.END);
-        resizer.realize.connect (() => {
-            resizer.get_window ().set_cursor (new Cursor.for_display(Gdk.Display.get_default(), CursorType.BOTTOM_RIGHT_CORNER));
+        resizer.realize.connect(() => {
+            resizer.get_window().set_cursor(new Cursor.for_display(Gdk.Display.get_default(), CursorType.BOTTOM_RIGHT_CORNER));
         });
         outer.pack_end(resizer, false, false, 0);
 
         editor_window.add(outer);
-        
+
         int tx, ty, mw, mh;
         editor_window.get_size(out mw, out mh);
         get_best_pos(mw, mh, out tx, out ty);
         editor_window.move(tx, ty);
         editor_window.show_all();
-        
+
         Idle.add(() => {
             if (editor_window == null) return false;
             if (editing_note_title == null) title_entry.grab_focus();
@@ -444,24 +490,27 @@ public class StickyApp : GLib.Object {
 
     private void autosave() {
         if (title_entry == null || text_view == null) return;
-        
+
         string new_title = title_entry.get_text().strip();
         if (new_title == "") new_title = "Untitled";
-        
+
         TextIter start, end;
         text_view.get_buffer().get_bounds(out start, out end);
         string content = text_view.get_buffer().get_text(start, end, false);
 
+        string safe_new_name = new_title.replace("/", "_");
+
         if (editing_note_title != new_title) {
             if (editing_note_title != null) {
-                var old_file = File.new_for_path(Path.build_filename(notes_dir, editing_note_title + ".txt"));
+                string safe_old_name = editing_note_title.replace("/", "_");
+                var old_file = File.new_for_path(Path.build_filename(notes_dir, safe_old_name + ".txt"));
                 try { old_file.delete(); } catch (Error e) {}
             }
-            editing_note_title = new_title; 
+            editing_note_title = new_title;
         }
 
         try {
-            FileUtils.set_contents(Path.build_filename(notes_dir, new_title + ".txt"), content);
+            FileUtils.set_contents(Path.build_filename(notes_dir, safe_new_name + ".txt"), content);
         } catch (Error e) {}
     }
 
@@ -474,9 +523,85 @@ public class StickyApp : GLib.Object {
         }
     }
 
-    public int run(string[] args) {
-        return app.run(args);
+    // ------------------------------------------------------------------------
+    // System Tray Integration
+    // ------------------------------------------------------------------------
+
+    private void setup_tray_icon() {
+        string home = Environment.get_home_dir();
+        string[] icon_paths = {
+            Path.build_filename(home, ".local", "share", "icons", "navwriter.png"),
+            "navwriter.png"
+        };
+
+        bool icon_loaded = false;
+        foreach (string path in icon_paths) {
+            if (FileUtils.test(path, FileTest.EXISTS)) {
+                try {
+                    var pixbuf = new Gdk.Pixbuf.from_file_at_scale(path, 24, 24, true);
+                    tray_icon = new StatusIcon.from_pixbuf(pixbuf);
+                    icon_loaded = true;
+                    break;
+                } catch (Error e) {}
+            }
+        }
+
+        if (!icon_loaded) {
+            tray_icon = new StatusIcon.from_icon_name("accessories-text-editor");
+        }
+
+        tray_icon.set_tooltip_text("Navwrite");
+
+        tray_icon.popup_menu.connect((button, time) => {
+            var menu = new Gtk.Menu();
+
+            var toggle_item = new Gtk.MenuItem.with_label(hub_window.get_visible() ? "Hide Hub" : "Show Hub");
+            toggle_item.activate.connect(() => {
+                if (hub_window.get_visible()) {
+                    force_close_editor();
+                    if (menu_window != null) {
+                        menu_window.destroy();
+                        menu_window = null;
+                    }
+                    hub_window.hide();
+                } else {
+                    hub_window.show_all();
+                }
+            });
+            menu.append(toggle_item);
+
+            var settings_item = new Gtk.MenuItem.with_label("Settings...");
+            settings_item.activate.connect(() => {
+                var dialog = new MessageDialog(
+                    null, 
+                    DialogFlags.MODAL, 
+                    MessageType.INFO, 
+                    ButtonsType.OK, 
+                    "Settings panel coming soon for the published version!"
+                );
+                dialog.title = "Navwrite Settings";
+                dialog.run();
+                dialog.destroy();
+            });
+            menu.append(settings_item);
+
+            menu.append(new Gtk.SeparatorMenuItem());
+
+            var quit_item = new Gtk.MenuItem.with_label("Quit Navwrite");
+            quit_item.activate.connect(() => {
+                force_close_editor();
+                app.quit();
+            });
+            menu.append(quit_item);
+
+            menu.show_all();
+            menu.popup(null, null, tray_icon.position_menu, button, time);
+        });
     }
+
+    // ------------------------------------------------------------------------
+    // Program Entry Point
+    // ------------------------------------------------------------------------
 
     public static int main(string[] args) {
         var app = new StickyApp();

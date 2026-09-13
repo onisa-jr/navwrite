@@ -1,73 +1,86 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# --- Navwrite Installer ---
-# Run this script in the directory containing the compiled binary and logo.
-# It moves them to your local directories and creates a menu shortcut.
+# ==============================================================================
+# Navwrite - Application Installer
+# ==============================================================================
+# Installs the compiled binary, desktop launcher, and application icon
+# to the standard user local directories (~/.local).
+# ==============================================================================
+
+set -euo pipefail
 
 APP_NAME="navwrite"
 BIN_DIR="$HOME/.local/bin"
 APP_DIR="$HOME/.local/share/applications"
+ICON_DIR="$HOME/.local/share/icons"
 DESKTOP_FILE="$APP_DIR/navwrite.desktop"
 ICON_FILE="navwriter.png"
-ICON_DEST_DIR="$HOME/.local/share/icons"
 
-echo " Preparing to install Navwrite..."
-
-# Detect the binary (handles if you compiled without -o navwrite)
-SOURCE_BIN="navwrite"
-if [ ! -f "./$SOURCE_BIN" ] && [ -f "./sticky_hub" ]; then
-    SOURCE_BIN="sticky_hub"
+# Handle uninstall flag
+if [[ "${1:-}" == "--uninstall" || "${1:-}" == "-u" ]]; then
+    echo "Uninstalling Navwrite..."
+    rm -f "$BIN_DIR/$APP_NAME"
+    rm -f "$DESKTOP_FILE"
+    rm -f "$ICON_DIR/$ICON_FILE"
+    update-desktop-database "$APP_DIR" 2>/dev/null || true
+    echo "Navwrite has been successfully uninstalled."
+    exit 0
 fi
 
-# Check if the binary actually exists in the folder
-if [ ! -f "./$SOURCE_BIN" ]; then
-    echo " Error: Could not find the binary in this folder."
-    echo "Make sure you are running this script from the extracted release folder."
+echo "Installing Navwrite..."
+
+# 1. Detect binary
+SOURCE_BIN=""
+if [[ -f "./navwrite" ]]; then
+    SOURCE_BIN="./navwrite"
+elif [[ -f "./sticky_hub" ]]; then
+    SOURCE_BIN="./sticky_hub"
+fi
+
+if [[ -z "$SOURCE_BIN" ]]; then
+    echo "Error: Binary not found in current directory."
+    echo "Please compile first using: valac --pkg gtk+-3.0 sticky_hub.vala -X -lm -o navwrite"
     exit 1
 fi
 
-# Ensure the binary has execute permissions
-chmod +x "./$SOURCE_BIN"
+chmod +x "$SOURCE_BIN"
 
-echo " Installing executable to $BIN_DIR..."
+# 2. Install binary
 mkdir -p "$BIN_DIR"
-# Copy and rename to navwrite if it was compiled as sticky_hub
-cp "./$SOURCE_BIN" "$BIN_DIR/$APP_NAME"
+cp --remove-destination "$SOURCE_BIN" "$BIN_DIR/$APP_NAME"
+echo "  Installed binary to $BIN_DIR/$APP_NAME"
 
-# Handle the custom logo
-if [ -f "./$ICON_FILE" ]; then
-    echo " Installing custom logo..."
-    mkdir -p "$ICON_DEST_DIR"
-    cp "./$ICON_FILE" "$ICON_DEST_DIR/"
-    ICON_PATH="$ICON_DEST_DIR/$ICON_FILE"
+# 3. Install application icon
+mkdir -p "$ICON_DIR"
+if [[ -f "./$ICON_FILE" ]]; then
+    cp --remove-destination "./$ICON_FILE" "$ICON_DIR/$ICON_FILE"
+    ICON_TARGET="$ICON_DIR/$ICON_FILE"
+    echo "  Installed application icon to $ICON_DIR/$ICON_FILE"
 else
-    echo " Warning: Logo $ICON_FILE not found! Using default icon."
-    ICON_PATH="accessories-text-editor"
+    ICON_TARGET="accessories-text-editor"
+    echo "  Warning: $ICON_FILE not found, using system fallback icon."
 fi
 
-echo " Creating Application Menu shortcut..."
+# 4. Create desktop entry
 mkdir -p "$APP_DIR"
-
-# Write the .desktop file
 cat <<EOF > "$DESKTOP_FILE"
 [Desktop Entry]
 Version=1.0
-Name=Navwrite
-Comment=Floating Sticky Notes with Dropbox Sync
-Exec=$BIN_DIR/$APP_NAME
-Icon=$ICON_PATH
-Terminal=false
 Type=Application
+Name=Navwrite
+GenericName=Sticky Notes
+Comment=Fast, floating scratchpad with Dropbox sync
+Exec=$BIN_DIR/$APP_NAME
+Icon=$ICON_TARGET
+Terminal=false
 Categories=Utility;TextEditor;
 StartupNotify=true
 EOF
 
-# Make the shortcut executable
 chmod +x "$DESKTOP_FILE"
-
-# Update desktop database so the menu refreshes immediately (suppress errors if command not found)
-update-desktop-database "$APP_DIR" 2>/dev/null
+update-desktop-database "$APP_DIR" 2>/dev/null || true
+echo "  Installed desktop entry to $DESKTOP_FILE"
 
 echo ""
-echo " BOOM! Navwrite is now installed on your system with your custom logo."
-echo " Press your Super/Windows key and search for 'Navwrite' to launch it!"
+echo "Navwrite has been successfully installed."
+echo "You can launch it from your applications menu or run 'navwrite' in your terminal."
